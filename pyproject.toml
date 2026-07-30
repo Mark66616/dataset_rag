@@ -28,3 +28,14 @@ dependencies = [
     "torchvision>=0.25.0",
     "uvicorn>=0.42.0",
 ]
+
+[tool.uv.sources]
+# 强制从 NVIDIA 源安装
+torch = { index = "pytorch-cuda" }
+torchvision = { index = "pytorch-cuda" }
+torchaudio = { index = "pytorch-cuda" }
+
+[[tool.uv.index]]
+name = "pytorch-cuda"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
