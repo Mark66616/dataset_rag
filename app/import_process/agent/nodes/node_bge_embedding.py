@@ -1,4 +1,4 @@
-import load_dotenv
+from dotenv import load_dotenv
 import sys
 import os
 from typing import Any, List, Dict
