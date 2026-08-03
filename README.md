@@ -8,7 +8,7 @@
 - Markdown 图片可由视觉模型生成摘要，并上传至 MinIO 后替换为对象链接。
 - 使用 BGE-M3 同时生成稠密/稀疏向量，支持 Milvus 混合检索。
 - 按文档识别产品（实体）名称，查询时先进行实体确认或反问。
-- 并行执行普通检索、HyDE 检索和 MCP Web 搜索，RRF 融合后由 BGE Reranker 重排。
+- 并行执行普通检索、HyDE 检索和 MCP Web 搜索；前两路经 RRF 融合，Web 结果在重排前合入。
 - FastAPI 提供上传、任务状态、问答、SSE 流式响应及会话历史接口。
 
 ## 项目结构
@@ -66,10 +66,10 @@ flowchart LR
     D -->|是| F1[普通混合向量检索]
     D -->|是| F2[HyDE 生成假设答案后检索]
     D -->|是| F3[MCP WebSearch]
-    F1 --> G[RRF 融合]
+    F1 --> G[RRF 融合（本地两路）]
     F2 --> G
-    F3 --> G
     G --> H[BGE Reranker 重排]
+    F3 --> H
     H --> I[LLM 基于上下文生成答案]
     I --> J[写入 MongoDB 历史 / 可选 SSE 推送]
 ```
@@ -184,6 +184,11 @@ curl -X POST http://localhost:8011/query \
 - 数据服务：`MILVUS_*`、`MINIO_*`、`MONGO_*`、`NEO4J_*`。
 - 外部解析与搜索：`MINERU_*`、`MCP_DASHSCOPE_*`。
 - 运行行为：`MODELSCOPE_OFFLINE`、模型缓存目录、日志级别和保留天数。
+
+## 落地清单与设计文档
+
+- [RAG 项目能力审计与落地清单](RAG_项目能力审计.md)：当前能力盘点、问题优先级、题库对应关系、已决定方案与 TODO。
+- [MongoDB 文档版本存储设计](DOCUMENT_VERSION_DESIGN.md)：多租户权限、文档版本、MinIO `object_key`、Milvus 同步、Celery 任务与死信队列的可落地设计。
 
 ## 开发与验证
 
