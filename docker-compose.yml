@@ -1,5 +1,3 @@
-version: '3.5'
-
 services:
   etcd:
     container_name: milvus-etcd
@@ -60,6 +58,38 @@ services:
       - "etcd"
       - "minio"
 
+  mongodb:
+    container_name: dataset-rag-mongodb
+    image: mongo:8.0
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/mongodb:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ ping: 1 }).ok"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  neo4j:
+    container_name: dataset-rag-neo4j
+    image: neo4j:5-community
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-neo4j-password}
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/neo4j/data:/data
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/neo4j/logs:/logs
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:7474 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+
 networks:
   default:
-    name: milvus
+    name: dataset-rag
