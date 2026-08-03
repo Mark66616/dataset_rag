@@ -1,6 +1,7 @@
 import time
 import sys
 
+from app.clients.mongo_history_utils_new import save_chat_message
 from app.utils.task_utils import add_running_task, add_done_task
 
 
@@ -15,15 +16,12 @@ def node_item_name_confirm(state):
         3. 标准化对齐 ：根据评分高低自动对齐标准型号，或生成反问让用户手动确认。
         4. 同步历史记录 ：将改写后的问题、确认的商品名和处理状态实时写入 MongoDB 数据库。
     """
-    print(f"---node_item_name_confirm---开始处理")
-    # 记录任务开始
-    add_running_task(state["session_id"], sys._getframe().f_code.co_name,state["is_stream"])
+    print(f"---node_item_name_confirm 处理")
 
-    # 后面会调用大模型，进行逻辑处理
-    time.sleep(1)
-    # 记录任务结束
-    add_done_task(state["session_id"], sys._getframe().f_code.co_name,state["is_stream"])
+    add_running_task(state['session_id'], sys._getframe().f_code.co_name, state.get("is_stream"))
+    add_done_task(state['session_id'], sys._getframe().f_code.co_name, state.get("is_stream"))
 
-    print(f"---node_item_name_confirm---处理结束")
+    save_chat_message(state['session_id'], "user", state['original_query'], "", state.get("item_names", []))
 
-    return {"item_names": ["示例商品"]}
+    print(f"---已保存对话 处理完成")
+

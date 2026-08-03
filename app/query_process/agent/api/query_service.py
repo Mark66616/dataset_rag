@@ -118,5 +118,32 @@ async def health():
     logger.info("健康检查接口调用成功")
     return {"ok": True}
 
+@app.get("/history/{session_id}")
+async def history(session_id: str, limit: int = 50):
+    """
+    查询当前会话历史记录
+    """
+    try:
+        records = get_recent_messages(session_id, limit=limit)
+        items = []
+        for r in records:
+            items.append({
+                "_id": str(r.get("_id")) if r.get("_id") is not None else "",
+                "session_id": r.get("session_id", ""),
+                "role": r.get("role", ""),
+                "text": r.get("text", ""),
+                "rewritten_query": r.get("rewritten_query", ""),
+                "item_names": r.get("item_names", []),
+                "ts": r.get("ts")
+            })
+        return {"session_id": session_id, "items": items}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"history error: {e}")
+
+@app.delete("/history/{session_id}")
+async def clear_chat_history(session_id: str):
+    count =  clear_history(session_id)
+    return {"message": "History cleared", "deleted_count": count}
+
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8011)
