@@ -324,7 +324,7 @@
 | # | 事项 | 为什么 | 怎么做 | 状态 |
 |---|---|---|---|---|
 | 0.1 | 补 Dockerfile + docker-compose 编排应用 | 现在只有中间件容器化，应用要手动起 | 两个服务各写 Dockerfile；Compose 加 app 服务；README 一键启动 | ✅ 已完成（Dockerfile + .dockerignore + compose 应用服务，GPU/CPU 可切换，见提交 bcf7b90） |
-| 0.2 | 任务状态持久化 | 现在 `task_utils` 是内存字典，重启丢任务、多 worker 不共享 | 把任务表落到 MongoDB（task_id/status/done_list），或引入 Celery+Redis | ⬜ 待办 |
+| 0.2 | 任务状态持久化 | 现在 `task_utils` 是内存字典，重启丢任务、多 worker 不共享 | 双层方案：① LangGraph MongoDB Checkpointer（`app/clients/checkpointer.py`，compile 挂 MongoDBSaver，thread_id=task_id，图执行状态断点续跑）；② MongoDB task 集合（`app/clients/task_store.py`，任务业务状态/进度/结果，供前端轮询与管理页）；Mongo 不可用时均降级不阻塞 | ✅ 已完成（提交 2d81bce） |
 | 0.3 | 修复"同商品名覆盖"缺陷 | 多文档同型号会互相删数据，是数据正确性问题 | 幂等键从 `item_name` 改为 `item_name + file_title`（或引入文档级 doc_id） | ⬜ 待办 |
 | 0.4 | 上传文件入 MinIO | 现在文件只落本地磁盘，无持久化 | 上传即传 MinIO，任务里引用 object_key | ⬜ 待办 |
 | 0.5 | CI 接入 pytest | 现在测试跑在本地 | GitHub Actions：uv sync → pytest（测试已就绪） | ⬜ 待办 |
