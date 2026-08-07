@@ -90,6 +90,95 @@ services:
       timeout: 10s
       retries: 10
 
+  # ---------------- 应用服务（可选：Docker 部署方式） ----------------
+  # 两个服务共用同一镜像，通过 command 区分；需要本地 BGE 模型：
+  #   - 把 bge-m3 目录放到 ${MODELS_CACHE_DIR:-./models_cache}/bge-m3
+  #   - 把 bge-reranker-large 目录放到 ${MODELS_CACHE_DIR:-./models_cache}/bge-reranker-large
+  # 模型目录含 config.json / model.safetensors 等文件（ModelScope/HF 下载的完整目录）。
+  # 默认启用 NVIDIA GPU（需主机安装 NVIDIA 驱动 + Docker GPU 运行时）；无 GPU 时：
+  #   - 移除 gpu: true
+  #   - 环境变量改 BGE_DEVICE=cpu / BGE_RERANKER_DEVICE=cpu / BGE_FP16=0 / BGE_RERANKER_FP16=0
+  import-service:
+    container_name: dataset-rag-import
+    build:
+      context: .
+      args:
+        # GPU 构建默认；CPU 环境改为 https://download.pytorch.org/whl/cpu
+        TORCH_INDEX_URL: ${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu128}
+        # PyPI 源（国内可设为清华镜像 https://pypi.tuna.tsinghua.edu.cn/simple）
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+    command: uvicorn app.import_process.api.file_import_service:app --host 0.0.0.0 --port 8000
+    restart: unless-stopped
+    gpu: true
+    ports:
+      - "8000:8000"
+    environment:
+      MILVUS_URL: http://standalone:19530
+      MINIO_ENDPOINT: minio:9000
+      MONGO_URL: mongodb://mongodb:27017
+      NEO4J_URI: bolt://neo4j:7687
+      MODELSCOPE_CACHE: /models
+      BGE_M3_PATH: /models/bge-m3
+      BGE_RERANKER_LARGE: /models/bge-reranker-large
+      # GPU 推理（默认）。CPU 环境改：BGE_DEVICE=cpu / BGE_FP16=0 / BGE_RERANKER_DEVICE=cpu / BGE_RERANKER_FP16=0
+      BGE_DEVICE: cuda:0
+      BGE_FP16: "1"
+      BGE_RERANKER_DEVICE: cuda:0
+      BGE_RERANKER_FP16: "1"
+      MINIO_SECURE: "false"
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/output:/app/output
+      - ${MODELS_CACHE_DIR:-./models_cache}:/models
+    depends_on:
+      standalone:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    env_file:
+      - .env
+
+  query-service:
+    container_name: dataset-rag-query
+    build:
+      context: .
+      args:
+        TORCH_INDEX_URL: ${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu128}
+        # PyPI 源（国内可设为清华镜像 https://pypi.tuna.tsinghua.edu.cn/simple）
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+    command: uvicorn app.query_process.agent.api.query_service:app --host 0.0.0.0 --port 8011
+    restart: unless-stopped
+    gpu: true
+    ports:
+      - "8011:8011"
+    environment:
+      MILVUS_URL: http://standalone:19530
+      MINIO_ENDPOINT: minio:9000
+      MONGO_URL: mongodb://mongodb:27017
+      NEO4J_URI: bolt://neo4j:7687
+      MODELSCOPE_CACHE: /models
+      BGE_M3_PATH: /models/bge-m3
+      BGE_RERANKER_LARGE: /models/bge-reranker-large
+      # GPU 推理（默认）。CPU 环境改：BGE_DEVICE=cpu / BGE_FP16=0 / BGE_RERANKER_DEVICE=cpu / BGE_RERANKER_FP16=0
+      BGE_DEVICE: cuda:0
+      BGE_FP16: "1"
+      BGE_RERANKER_DEVICE: cuda:0
+      BGE_RERANKER_FP16: "1"
+      MINIO_SECURE: "false"
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/output:/app/output
+      - ${MODELS_CACHE_DIR:-./models_cache}:/models
+    depends_on:
+      standalone:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    env_file:
+      - .env
+
 networks:
   default:
     name: dataset-rag

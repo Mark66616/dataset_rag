@@ -1,0 +1,35 @@
+# 依赖与虚拟环境
+.venv/
+__pycache__/
+*.pyc
+
+# 版本控制
+.git/
+.gitignore
+.gitattributes
+
+# IDE
+.idea/
+.vscode/
+
+# 运行时数据（不进入镜像）
+output/
+volumes/
+temp-files/
+models_cache/
+logs/
+
+# 配置与密钥（不进入镜像，通过 env_file / 环境变量注入）
+.env
+.env.*
+!.env.example
+
+# 文档与示例（镜像只需 app/ 与 prompts/）
+doc/
+tests/
+examples/
+*.md
+*.xlsx
+
+# 系统文件
+.DS_Store

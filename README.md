@@ -27,10 +27,13 @@ dataset-rag/
 │   ├── lm/                         # LLM、BGE Embedding、Reranker 封装
 │   └── tool/                       # BGE-M3 / Reranker 模型下载脚本
 ├── prompts/                        # 实体识别、HyDE、图片摘要、回答等 Prompt
-├── tests/                          # 两条工作流的图执行示例
+├── tests/                          # pytest 单元测试（纯逻辑，无需外部服务）
+├── examples/                       # 两条工作流的图执行示例脚本
 ├── doc/                            # 示例文档
 ├── volumes/                        # Docker 中间件持久化数据（运行时生成）
-├── docker-compose.yml              # Milvus、MinIO、MongoDB、Neo4j 编排
+├── docker-compose.yml              # Milvus、MinIO、MongoDB、Neo4j 编排 + 应用服务
+├── Dockerfile                      # 应用镜像（多阶段构建，CPU/GPU 可切换）
+├── .dockerignore                   # 镜像构建上下文排除规则
 ├── .env.example                    # 脱敏配置模板
 └── pyproject.toml                  # Python 依赖与 uv 配置
 ```
@@ -76,21 +79,20 @@ flowchart LR
 
 ## 快速开始
 
-### 1. 准备环境
+提供两种部署方式：
 
-要求：Python 3.12+、Docker Compose，以及可用的 MinerU、OpenAI 兼容 LLM 和（可选）百炼 MCP WebSearch 服务。
+- **方式 A（推荐）**：全部使用 Docker —— 中间件 + 应用服务由 `docker-compose.yml` 一键编排；
+- **方式 B**：应用在宿主机用 `uv` 运行，仅中间件用 Docker（适合本地开发调试）。
+
+### 准备环境
+
+要求：Docker Compose（方式 A），或 Python 3.12+（方式 B）；以及可用的 MinerU、OpenAI 兼容 LLM 和（可选）百炼 MCP WebSearch 服务。
 
 ```bash
 cp .env.example .env
-uv sync
 ```
 
-Windows PowerShell 可使用：
-
-```powershell
-Copy-Item .env.example .env
-uv sync
-```
+Windows PowerShell 可使用：`Copy-Item .env.example .env`
 
 编辑 `.env`，至少填写以下密钥及服务地址：
 
@@ -98,18 +100,47 @@ uv sync
 - `MINERU_API_TOKEN=your-mineru-api-key`
 - `NEO4J_PASSWORD=your-neo4j-password`
 - `MINIO_ACCESS_KEY`、`MINIO_SECRET_KEY`
-- 外部部署时，将 `your-neo4j-host`、`your-mongodb-host` 替换为实际主机名或 IP。
 
-### 2. 启动中间件
+> 注意：`docker-compose.yml` 中应用服务会通过 `environment` 覆盖中间件地址（指向 Compose 网络内的服务名），因此 `.env` 中的 `MILVUS_URL` / `MONGO_URL` 等中间件地址仅在方式 B 下生效。
 
-根目录原先没有 `Dockerfile`，而是使用 Compose 管理基础设施。本仓库的 `docker-compose.yml` 已覆盖所有代码实际使用的中间件：Milvus（含 etcd/MinIO）、MongoDB 和 Neo4j。
+### 方式 A：Docker 部署（推荐，在目标服务器上执行）
+
+> 应用默认面向带 NVIDIA 显卡的 x86_64 Linux 主机（GPU 推理）；构建需在目标机器上执行，本仓库不提供在其他平台构建的保证。
 
 ```bash
-docker compose up -d
+# 1. 准备本地模型目录（放入 bge-m3 / bge-reranker-large 两个完整模型目录）
+mkdir -p models_cache/bge-m3 models_cache/bge-reranker-large
+# 将模型文件放入对应目录（含 config.json / model.safetensors 等）
+
+# 2. 构建并启动全部服务（中间件 + 导入服务 + 查询服务）
+docker compose up -d --build
 docker compose ps
 ```
 
-使用本地 Compose 时，`.env` 请使用：
+- 首次构建会下载 PyTorch（cu128 GPU 版）等依赖，耗时较长；无 GPU 时构建参数 `TORCH_INDEX_URL` 改为 `https://download.pytorch.org/whl/cpu`（`--build-arg` 或 `.env` 中设置）。
+- 镜像构建不依赖 ghcr.io（国内网络友好）：builder 阶段基于 `python:3.12-slim` + pip 安装 uv；如 PyPI 下载慢，可传 `--build-arg PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple`（或在 `.env` 中设置 `PIP_INDEX_URL`）。
+- 模型目录挂载：宿主机 `${MODELS_CACHE_DIR:-./models_cache}` → 容器 `/models`；容器内 `BGE_M3_PATH=/models/bge-m3`、`BGE_RERANKER_LARGE=/models/bge-reranker-large`。
+- 应用默认 GPU 推理（`gpu: true` + `BGE_DEVICE=cuda:0`），需主机安装 NVIDIA 驱动与 Docker GPU 运行时；CPU 部署时按 `docker-compose.yml` 注释移除 `gpu: true` 并修改推理设备为 `cpu`。
+- 若不想在 Compose 中构建应用服务，可只起中间件：`docker compose up -d etcd minio standalone mongodb neo4j`。
+
+访问：导入页 `http://<服务器IP>:8000/import.html`，问答页 `http://<服务器IP>:8011/chat.html`。
+
+### 方式 B：宿主机运行（本地开发）
+
+#### 1. 安装依赖
+
+```bash
+uv sync
+```
+
+#### 2. 启动中间件
+
+```bash
+docker compose up -d etcd minio standalone mongodb neo4j
+docker compose ps
+```
+
+`.env` 请使用本机地址：
 
 ```dotenv
 MILVUS_URL=http://localhost:19530
@@ -119,6 +150,8 @@ NEO4J_URI=bolt://localhost:7687
 ```
 
 服务端口：Milvus `19530`（健康检查 `9091`）、MinIO API `9002` / Console `9003`、MongoDB `27017`、Neo4j HTTP `7474` / Bolt `7687`。
+
+> 注意：`docker-compose.yml` 中 `minio` 服务将容器内 `9000` 映射为宿主机 `9002`，因此宿主机运行的应用应使用 `MINIO_ENDPOINT=localhost:9002`（本仓库 Compose 中默认暴露 `9002`，若你自行起 MinIO 请按实际端口配置）。
 
 如不使用 Docker，可分别安装并启动以下中间件：
 
@@ -131,7 +164,7 @@ NEO4J_URI=bolt://localhost:7687
 
 > 当前导入主链路写入的是 Milvus；项目保留了 Neo4j 客户端，配置并启动它可供图能力扩展使用。
 
-### 3. 准备本地模型（可选）
+#### 3. 准备本地模型（可选）
 
 若使用本地 BGE 模型，请先设置 `.env` 中的 `MODELSCOPE_CACHE`，再执行：
 
@@ -142,7 +175,7 @@ uv run python -m app.tool.download_reranker
 
 模型路径需与 `BGE_M3_PATH`、`BGE_RERANKER_LARGE` 相匹配；CPU 环境应保持 `BGE_DEVICE=cpu`、`BGE_FP16=0`。
 
-### 4. 启动 API
+#### 4. 启动 API
 
 导入服务和查询服务是两个独立进程：
 
@@ -193,12 +226,14 @@ curl -X POST http://localhost:8011/query \
 ## 开发与验证
 
 ```bash
-uv run pytest
-uv run python -m tests.test_main_graph
-uv run python -m tests.test_query_main_graph
+uv sync          # 安装依赖（含 pytest）
+uv run pytest    # 运行纯逻辑单元测试（无需外部服务）
+uv run python -m examples.run_import_graph   # 构建并执行导入工作流
+uv run python -m examples.run_query_graph    # 构建并执行查询工作流
 ```
 
-两份测试脚本会构建并执行对应 LangGraph；它们需要已配置的模型、外部 API 和中间件。
+- `pytest` 覆盖切分、RRF 融合、Milvus 转义、稀疏向量归一化等纯函数，不依赖模型与中间件。
+- `examples/` 下的两个脚本会构建并执行对应 LangGraph；它们需要已配置的模型、外部 API 和中间件。
 
 ## 注意事项
 
