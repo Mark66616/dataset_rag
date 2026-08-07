@@ -31,13 +31,14 @@ dependencies = [
     "torchaudio>=2.10.0",
     "torchvision>=0.25.0",
     "uvicorn>=0.42.0",
+    "pytest>=8.0.0",
 ]
 
 [tool.uv.sources]
-# 强制从 NVIDIA 源安装
-torch = { index = "pytorch-cuda" }
-torchvision = { index = "pytorch-cuda" }
-torchaudio = { index = "pytorch-cuda" }
+# 强制从 NVIDIA 源安装（仅 Linux/GPU 服务器生效；macOS/Windows 自动回退 PyPI CPU 版）
+torch = { index = "pytorch-cuda", marker = "sys_platform == 'linux'" }
+torchvision = { index = "pytorch-cuda", marker = "sys_platform == 'linux'" }
+torchaudio = { index = "pytorch-cuda", marker = "sys_platform == 'linux'" }
 
 [[tool.uv.index]]
 name = "pytorch-cuda"
