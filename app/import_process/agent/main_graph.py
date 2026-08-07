@@ -5,6 +5,7 @@ from langgraph.graph import StateGraph, END, START
 
 from app.core.logger import logger
 from app.core.node_hooks import node_hook, default_retry_policy
+from app.clients.checkpointer import get_checkpointer
 # 导入自定义状态类：统一管理工作流全程的所有数据（各节点共享/修改）
 from app.import_process.agent.state import ImportGraphState, create_default_state
 # 导入所有自定义业务节点：每个节点对应知识库导入的一个具体步骤
@@ -91,10 +92,12 @@ workflow.add_edge("node_bge_embedding", "node_import_milvus")  # 向量化完成
 workflow.add_edge("node_import_milvus", END)  # milvus入库完成 → 工作流执行结束（END是内置结束节点）
 
 # ===================== 6. 编译工作流为可执行对象 =====================
-# 语法：compile() → 将StateGraph构建的流程编译为LangGraph的可执行应用
-# 作用：生成可调用的kb_import_app，通过invoke()方法触发工作流执行
-# 特性：编译后可重复调用，支持传入不同的初始状态，实现多任务执行
-kb_import_app = workflow.compile()
+# 挂载 MongoDB Checkpointer：按 task_id(thread_id) 持久化图执行状态，
+# 进程重启后可用同一 thread_id 从断点继续执行。
+# MongoDB 不可用时降级为无 checkpoint 模式（不影响流程运行）。
+checkpointer = get_checkpointer()
+kb_import_app = workflow.compile(checkpointer=checkpointer)
+logger.info(f"导入图编译完成，checkpoint 模式：{'已启用(MongoDB)' if checkpointer else '未启用(降级)'}")
 
 if __name__ == "__main__":
     from app.utils.path_util import PROJECT_ROOT

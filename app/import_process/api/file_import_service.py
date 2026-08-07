@@ -77,7 +77,12 @@ def run_graph_task(task_id: str, local_dir: str, local_file_path: str):
         init_state["local_file_path"] = local_file_path  # 上传文件本地路径
 
         # 3. 流式执行LangGraph全流程（stream模式：实时获取每个节点的执行结果）
-        for event in kb_import_app.stream(init_state):
+        # 传入 config.thread_id=task_id：与 MongoDB Checkpointer 配合，
+        # 进程重启后可用同一 task_id 从断点继续执行（而非从头开始）。
+        for event in kb_import_app.stream(
+            init_state,
+            config={"configurable": {"thread_id": task_id}},
+        ):
             for node_name, node_result in event.items():
                 # 记录每个节点完成的日志，包含任务ID和节点名，方便追踪执行顺序
                 logger.info(f"[{task_id}] LangGraph节点执行完成：{node_name}")
