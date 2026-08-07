@@ -205,5 +205,5 @@ if __name__ == "__main__":
     uvicorn.run(
         app=app,
         host="127.0.0.1",  # 仅本地访问，生产环境改为0.0.0.0（允许所有IP访问）
-        port=8010  # 服务端口
+        port=8000  # 服务端口（与 README 快速开始一致）
     )

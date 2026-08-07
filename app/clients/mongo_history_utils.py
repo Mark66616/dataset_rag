@@ -175,7 +175,12 @@ def update_message_item_names(ids: List[str], item_names: List[str]) -> int:
         result = mongo_tool.chat_message.update_many(
             # 更新条件：复合条件，同时满足
             {
-                "_id": {"$in": object_ids}# 主键在指定的ID列表中（批量筛选）
+                "_id": {"$in": object_ids},  # 主键在指定的ID列表中（批量筛选）
+                "$or": [  # 仅更新 item_names 未设置/为空的记录，避免覆盖已有商品名关联
+                    {"item_names": {"$exists": False}},  # item_names字段不存在
+                    {"item_names": []},  # item_names是空列表
+                    {"item_names": None}  # item_names是None
+                ]
             },
             {"$set": {"item_names": item_names}}  # 更新操作：设置新的商品名称列表
         )

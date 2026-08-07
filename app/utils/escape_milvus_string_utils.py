@@ -1,5 +1,5 @@
 # ===================== 核心辅助函数 =====================
-def escape_milvus_string(value: str) -> str:
+def escape_milvus_string(value) -> str:
     """
     Milvus过滤表达式专用字符串安全转义函数
     核心作用：

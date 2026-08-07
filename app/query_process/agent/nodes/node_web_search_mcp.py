@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 
 from app.conf.bailian_mcp_config import mcp_config
 from app.utils.task_utils import add_running_task, add_done_task
+from app.core.logger import logger
 
 load_dotenv()
 
@@ -62,7 +63,7 @@ async def mcp_call_streamable(query):
         await search_mcp.cleanup()
 
 def node_web_search_mcp(state):
-    print("---node_web_search_mcp处理---")
+    logger.info("---node_web_search_mcp 开始处理---")
     add_running_task(state["session_id"], sys._getframe().f_code.co_name, state.get("is_stream"))
 
     query = state.get("rewritten_query", "")
@@ -83,7 +84,7 @@ def node_web_search_mcp(state):
                     continue
                 docs.append({"title": title, "url": url, "snippet": snippet})
 
-            print("MCP 搜索结果:", docs)
+            logger.info(f"MCP 搜索结果 {len(docs)} 条")
     add_done_task(state["session_id"], sys._getframe().f_code.co_name, state.get("is_stream"))
     if docs:
         return {"web_search_docs": docs}

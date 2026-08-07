@@ -255,7 +255,7 @@ def node_rerank(state):
   Rerank节点
   对检索到的文档进行重新排序，提高相关性
   """
-  print("---Rerank---")
+  logger.info("---Rerank 节点开始处理---")
   add_running_task(state["session_id"], sys._getframe().f_code.co_name, state.get("is_stream"))
 
   # 阶段一：合并文档
@@ -264,7 +264,7 @@ def node_rerank(state):
   scored_docs = step_2_rerank_docs(state, doc_items)
   # 阶段三：动态 TopK
   topk_docs = step_3_topk(scored_docs)
-  print("最终文档:",  topk_docs )
+  logger.info(f"Rerank 处理完成，最终保留 {len(topk_docs)} 条文档")
 
   add_done_task(state['session_id'], sys._getframe().f_code.co_name, state.get("is_stream"))
   return {"reranked_docs": topk_docs}
