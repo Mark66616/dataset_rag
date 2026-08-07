@@ -321,22 +321,22 @@
 
 ### 阶段 0：工程化保命（1-2 周）⭐ 最高优先
 
-| # | 事项 | 为什么 | 怎么做 |
-|---|---|---|---|
-| 0.1 | 补 Dockerfile + docker-compose 编排应用 | 现在只有中间件容器化，应用要手动起 | 两个服务各写 Dockerfile；Compose 加 app 服务；README 一键启动 |
-| 0.2 | 任务状态持久化 | 现在 `task_utils` 是内存字典，重启丢任务、多 worker 不共享 | 把任务表落到 MongoDB（task_id/status/done_list），或引入 Celery+Redis |
-| 0.3 | 修复"同商品名覆盖"缺陷 | 多文档同型号会互相删数据，是数据正确性问题 | 幂等键从 `item_name` 改为 `item_name + file_title`（或引入文档级 doc_id） |
-| 0.4 | 上传文件入 MinIO | 现在文件只落本地磁盘，无持久化 | 上传即传 MinIO，任务里引用 object_key |
-| 0.5 | CI 接入 pytest | 现在测试跑在本地 | GitHub Actions：uv sync → pytest（测试已就绪） |
+| # | 事项 | 为什么 | 怎么做 | 状态 |
+|---|---|---|---|---|
+| 0.1 | 补 Dockerfile + docker-compose 编排应用 | 现在只有中间件容器化，应用要手动起 | 两个服务各写 Dockerfile；Compose 加 app 服务；README 一键启动 | ✅ 已完成（Dockerfile + .dockerignore + compose 应用服务，GPU/CPU 可切换，见提交 bcf7b90） |
+| 0.2 | 任务状态持久化 | 现在 `task_utils` 是内存字典，重启丢任务、多 worker 不共享 | 把任务表落到 MongoDB（task_id/status/done_list），或引入 Celery+Redis | ⬜ 待办 |
+| 0.3 | 修复"同商品名覆盖"缺陷 | 多文档同型号会互相删数据，是数据正确性问题 | 幂等键从 `item_name` 改为 `item_name + file_title`（或引入文档级 doc_id） | ⬜ 待办 |
+| 0.4 | 上传文件入 MinIO | 现在文件只落本地磁盘，无持久化 | 上传即传 MinIO，任务里引用 object_key | ⬜ 待办 |
+| 0.5 | CI 接入 pytest | 现在测试跑在本地 | GitHub Actions：uv sync → pytest（测试已就绪） | ⬜ 待办 |
 
 ### 阶段 1：可靠性与可观测（1-2 周）
 
-| # | 事项 | 怎么做 |
-|---|---|---|
-| 1.1 | 统一异常处理与重试 | MinerU 轮询、LLM 调用、Milvus 写入加指数退避重试；关键节点失败时任务标记 failed + 错误入库 |
-| 1.2 | 结构化日志 + 指标 | loguru 已有，补 request_id 贯穿；统计每节点耗时、每轮检索/生成延迟 |
-| 1.3 | 任务取消与超时治理 | 长任务可取消；导入任务整体超时控制 |
-| 1.4 | 配置收敛 | `os.environ.get` 散落各节点，统一走 `app/conf/*` 配置类（部分已完成，收尾） |
+| # | 事项 | 怎么做 | 状态 |
+|---|---|---|---|
+| 1.1 | 统一异常处理与重试 | MinerU 轮询、LLM 调用、Milvus 写入加指数退避重试；关键节点失败时任务标记 failed + 错误入库 | ✅ 已完成（`app/core/node_hooks.py`：node_hook 装饰器统一「开始/完成/异常」日志、耗时指标、任务状态；外部服务节点挂 LangGraph 原生 RetryPolicy 指数退避重试，见提交 bd2e462） |
+| 1.2 | 结构化日志 + 指标 | loguru 已有，补 request_id 贯穿；统计每节点耗时、每轮检索/生成延迟 | ✅ 部分完成（node_hook 已输出节点级耗时与计数指标 `get_node_metrics()`，可直接接 Prometheus；request_id 贯穿待补） |
+| 1.3 | 任务取消与超时治理 | 长任务可取消；导入任务整体超时控制 | ⬜ 待办（LangGraph 原生 `timeout`/`TimeoutPolicy` 已可用于节点级超时，后续按节点配置） |
+| 1.4 | 配置收敛 | `os.environ.get` 散落各节点，统一走 `app/conf/*` 配置类（部分已完成，收尾） | 🔄 进行中 |
 
 ### 阶段 2：产品能力补全（2-3 周）
 
