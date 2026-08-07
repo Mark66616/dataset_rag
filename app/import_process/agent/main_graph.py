@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 from langgraph.graph import StateGraph, END, START
 
 from app.core.logger import logger
+from app.core.node_hooks import node_hook, default_retry_policy
 # 导入自定义状态类：统一管理工作流全程的所有数据（各节点共享/修改）
 from app.import_process.agent.state import ImportGraphState, create_default_state
 # 导入所有自定义业务节点：每个节点对应知识库导入的一个具体步骤
@@ -26,16 +27,20 @@ load_dotenv()
 workflow = StateGraph(ImportGraphState)
 
 # ===================== 2. 注册所有业务节点 =====================
-# 语法：add_node("节点唯一标识", 节点函数)
-# 要求：节点函数必须接收「状态对象」作为入参，返回字典（用于更新状态）
-# 所有节点按「知识库导入流程」先后顺序注册，节点标识与函数名保持一致，便于维护
-workflow.add_node("node_entry", node_entry)  # 流程入口：参数初始化、输入校验
-workflow.add_node("node_pdf_to_md", node_pdf_to_md)  # PDF转MD：非MD格式文件的前置处理
-workflow.add_node("node_md_img", node_md_img)  # MD图片处理：保证文档中图片的可访问性
-workflow.add_node("node_document_split", node_document_split)  # 文档分块：解决大文本无法向量化/推理的问题
-workflow.add_node("node_item_name_recognition", node_item_name_recognition)  # 项目名识别：业务定制化步骤，提取核心业务标识
-workflow.add_node("node_bge_embedding", node_bge_embedding)  # BGE向量化：文本→向量，为milvus存储做准备
-workflow.add_node("node_import_milvus", node_import_milvus)  # 向量入库：将向量数据持久化到milvus
+# 说明：所有节点统一用 node_hook 包装，获得「开始/完成/异常」相呼应日志、耗时指标与任务状态更新；
+# 调用外部服务（MinerU / VLM / LLM / Milvus）的节点额外挂载默认重试策略（指数退避 + 抖动）。
+# 注意：节点标识与函数名保持一致，便于维护。
+workflow.add_node("node_entry", node_hook(node_entry))  # 流程入口：参数初始化、输入校验
+workflow.add_node("node_pdf_to_md", node_hook(node_pdf_to_md),
+                  retry_policy=default_retry_policy())  # PDF转MD：MinerU 外部 API，可重试
+workflow.add_node("node_md_img", node_hook(node_md_img),
+                  retry_policy=default_retry_policy())  # MD图片处理：VLM + MinIO 外部依赖，可重试
+workflow.add_node("node_document_split", node_hook(node_document_split))  # 文档分块：本地计算，不重试
+workflow.add_node("node_item_name_recognition", node_hook(node_item_name_recognition),
+                  retry_policy=default_retry_policy())  # 项目名识别：LLM + Milvus 外部依赖，可重试
+workflow.add_node("node_bge_embedding", node_hook(node_bge_embedding))  # BGE向量化：本地模型，不重试
+workflow.add_node("node_import_milvus", node_hook(node_import_milvus),
+                  retry_policy=default_retry_policy())  # 向量入库：Milvus 外部依赖，可重试
 
 # ===================== 3. 设置工作流入口节点 =====================
 # 语法：set_entry_point("节点标识") → 推荐写法，直接指定流程起始节点

@@ -1,5 +1,6 @@
 from langgraph.graph import StateGraph, END
 
+from app.core.node_hooks import node_hook, default_retry_policy
 from app.query_process.agent.nodes.node_answer_output import node_answer_output
 from app.query_process.agent.nodes.node_item_name_confirm import node_item_name_confirm
 from app.query_process.agent.nodes.node_rerank import node_rerank
@@ -11,14 +12,20 @@ from app.query_process.agent.state import QueryGraphState
 
 builder = StateGraph(QueryGraphState)
 
-# 注册节点（已删除虚拟节点）
-builder.add_node("node_item_name_confirm", node_item_name_confirm)
-builder.add_node("node_search_embedding", node_search_embedding)
-builder.add_node("node_search_embedding_hyde", node_search_embedding_hyde)
-builder.add_node("node_web_search_mcp", node_web_search_mcp)
-builder.add_node("node_rrf", node_rrf)
-builder.add_node("node_rerank", node_rerank)
-builder.add_node("node_answer_output", node_answer_output)
+# 注册节点：统一用 node_hook 包装（相呼应日志/耗时指标/任务状态）；
+# 调用外部服务（LLM / Milvus / MCP Web）的节点挂载默认重试策略。
+builder.add_node("node_item_name_confirm", node_hook(node_item_name_confirm),
+                 retry_policy=default_retry_policy())  # LLM + Milvus + Mongo，可重试
+builder.add_node("node_search_embedding", node_hook(node_search_embedding),
+                 retry_policy=default_retry_policy())  # BGE 向量化 + Milvus，可重试
+builder.add_node("node_search_embedding_hyde", node_hook(node_search_embedding_hyde),
+                 retry_policy=default_retry_policy())  # LLM + Milvus，可重试
+builder.add_node("node_web_search_mcp", node_hook(node_web_search_mcp),
+                 retry_policy=default_retry_policy())  # MCP Web 搜索，可重试
+builder.add_node("node_rrf", node_hook(node_rrf))  # 本地融合，不重试
+builder.add_node("node_rerank", node_hook(node_rerank))  # 本地 Rerank，不重试
+builder.add_node("node_answer_output", node_hook(node_answer_output),
+                 retry_policy=default_retry_policy())  # LLM 生成，可重试
 
 # 入口
 builder.set_entry_point("node_item_name_confirm")
