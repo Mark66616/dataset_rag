@@ -221,7 +221,7 @@ curl -X POST http://localhost:8011/query \
 ## 落地清单与设计文档
 
 - [RAG 项目能力审计与落地清单](RAG_项目能力审计.md)：当前能力盘点、问题优先级、题库对应关系、已决定方案与 TODO。
-- [MongoDB 文档版本存储设计](DOCUMENT_VERSION_DESIGN.md)：多租户权限、文档版本、MinIO `object_key`、Milvus 同步、Celery 任务与死信队列的可落地设计。
+- [文档版本存储设计](relation_doc/文档版本存储设计.md)：多租户权限、文档版本、MinIO `object_key`、Milvus 同步、Celery 任务与死信队列的可落地设计。
 
 ## 开发与验证
 
