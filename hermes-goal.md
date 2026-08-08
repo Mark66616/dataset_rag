@@ -10,9 +10,9 @@
 
 ## 🚀 进度速览（2026-08-08 更新）
 
-**已完成 ✅**：P0.1 Dockerfile 部署｜P0.2 MongoDB Checkpointer 任务断点续跑 + task 持久化｜P1.1 节点 Hook 统一异常/重试｜P1.2 节点级耗时指标（request_id 待补）｜52 个 pytest 单测（6s 跑完）
+**已完成 ✅**：P0.1 Dockerfile 部署｜P0.2 MongoDB Checkpointer 任务断点续跑 + task 持久化｜P0.3 文档级版本化（修复同商品名互删 + 防检索窗口期）｜P1.1 节点 Hook 统一异常/重试｜P1.2 节点级耗时指标（request_id 待补）｜63 个 pytest 单测（7s 跑完）
 
-**下一步 🔜**：P0.3 修"同商品名覆盖"缺陷（数据正确性，建议优先）→ P0.5 CI 接入 → P0.4 上传文件入 MinIO
+**下一步 🔜**：P0.5 CI 接入 → P0.4 上传文件入 MinIO → P1.3 任务超时治理
 
 **当前里程碑**：POC ✅ 已达成；MVP 🔄 进行中（阶段 0: 2/5，阶段 1: 2/4）
 
@@ -335,13 +335,13 @@
 
 | 阶段 | 事项 | 状态 |
 |---|---|---|
-| 阶段 0 | 0.1 Dockerfile 部署 / 0.2 任务持久化+断点续跑 | ✅ 已完成 |
-| 阶段 0 | 0.3 同商品名覆盖 / 0.4 上传入 MinIO / 0.5 CI | ⬜ 待办 |
+| 阶段 0 | 0.1 Dockerfile 部署 / 0.2 任务持久化+断点续跑 / 0.3 文档级版本化 | ✅ 已完成 |
+| 阶段 0 | 0.4 上传入 MinIO / 0.5 CI | ⬜ 待办 |
 | 阶段 1 | 1.1 统一异常处理与重试 / 1.2 结构化日志与指标 | ✅ 已完成（1.2 的 request_id 贯穿待补） |
 | 阶段 1 | 1.3 任务取消与超时 / 1.4 配置收敛 | ⬜ 待办（1.4 进行中） |
-| 阶段 2 | 2.1-2.4 文档版本 / 多租户 / 文档管理 API / 拆大节点 | ⬜ 全部待办 |
+| 阶段 2 | 2.1-2.4 文档版本 / 多租户 / 文档管理 API / 拆大节点 | ⬜ 全部待办（2.1 的 Milvus 侧版本化已在 P0.3 完成，剩余 MongoDB 版本记录 + 回滚 API） |
 | 阶段 3 | 3.1-3.4 评测集 / 指标 / 调优 / 回归 | ⬜ 全部待办 |
-| 测试体系 | 52 个 pytest 单测（切分/RRF/转义/归一化/hook/持久化），conftest 收紧外部连接超时 | ✅ 已完成（测试 6s 内跑完） |
+| 测试体系 | 63 个 pytest 单测（切分/RRF/转义/归一化/hook/持久化/版本化），conftest 收紧外部连接超时 | ✅ 已完成（测试 7s 内跑完） |
 
 > 侧记：本轮另完成两项基础设施改进——① torch 依赖加平台 marker（Linux 用 cu128，macOS/Windows 回退 PyPI，修复跨平台 `uv sync` 失败）；② `uv.lock` 纳入版本控制（Dockerfile 可复现构建依赖）。
 
@@ -351,7 +351,7 @@
 |---|---|---|---|---|
 | 0.1 | 补 Dockerfile + docker-compose 编排应用 | 现在只有中间件容器化，应用要手动起 | 两个服务各写 Dockerfile；Compose 加 app 服务；README 一键启动 | ✅ 已完成（Dockerfile + .dockerignore + compose 应用服务，GPU/CPU 可切换，见提交 bcf7b90） |
 | 0.2 | 任务状态持久化 | 现在 `task_utils` 是内存字典，重启丢任务、多 worker 不共享 | 双层方案：① LangGraph MongoDB Checkpointer（`app/clients/checkpointer.py`，compile 挂 MongoDBSaver，thread_id=task_id，图执行状态断点续跑）；② MongoDB task 集合（`app/clients/task_store.py`，任务业务状态/进度/结果，供前端轮询与管理页）；Mongo 不可用时均降级不阻塞 | ✅ 已完成（提交 2d81bce） |
-| 0.3 | 修复"同商品名覆盖"缺陷 | 多文档同型号会互相删数据，是数据正确性问题 | 幂等键从 `item_name` 改为 `item_name + file_title`（或引入文档级 doc_id） | ⬜ 待办 |
+| 0.3 | 修复"同商品名覆盖"缺陷 | 多文档同型号会互相删数据，是数据正确性问题 | 文档级版本化：Milvus chunk 加 document_id/document_version/index_status；幂等清理按 doc_id 清非 active 残留；新增 node_publish_version 发布节点（staging→active，旧版本→superseded，防检索窗口期）；检索过滤 `index_status=="active"`；上传接口支持 document_id/version（更新上传显式指定） | ✅ 已完成（提交 7ef6c1a） |
 | 0.4 | 上传文件入 MinIO | 现在文件只落本地磁盘，无持久化 | 上传即传 MinIO，任务里引用 object_key | ⬜ 待办 |
 | 0.5 | CI 接入 pytest | 现在测试跑在本地 | GitHub Actions：uv sync → pytest（测试已就绪） | ⬜ 待办 |
 
@@ -393,8 +393,8 @@
 
 | 里程碑 | 验收标准 | 当前进度 |
 |---|---|---|
-| POC（现在） | 两条图跑通、本地 demo 可演示、纯函数有单测 | ✅ 已达成（52 个单测；导入/查询双图可编译） |
-| MVP | 阶段 0+1 完成：一键部署、任务可靠、数据不丢、有 CI | 🔄 进行中：阶段 0 完成 2/5（0.1✅ 0.2✅，0.3/0.4/0.5 待办）；阶段 1 完成 2/4（1.1✅ 1.2✅ 主要部分，1.3/1.4 待办） |
+| POC（现在） | 两条图跑通、本地 demo 可演示、纯函数有单测 | ✅ 已达成（63 个单测；导入/查询双图可编译） |
+| MVP | 阶段 0+1 完成：一键部署、任务可靠、数据不丢、有 CI | 🔄 进行中：阶段 0 完成 3/5（0.1✅ 0.2✅ 0.3✅，0.4/0.5 待办）；阶段 1 完成 2/4（1.1✅ 1.2✅ 主要部分，1.3/1.4 待办） |
 | 可发布 | MVP + 阶段 2+3：版本管理、多租户、评测闭环、安全加固 | ⬜ 未开始 |
 
 ---
