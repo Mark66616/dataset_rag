@@ -372,10 +372,10 @@ if __name__ == '__main__':
 
     print("正在执行 Milvus 导入节点测试...")
     try:
-        # 检查必要的环境变量
-        if not os.getenv("MILVUS_URL"):
+        # 检查必要的配置（P1.4：统一走配置类）
+        if not milvus_config.milvus_url:
             print("❌ 未设置 MILVUS_URL，无法连接 Milvus")
-        elif not os.getenv("CHUNKS_COLLECTION"):
+        elif not milvus_config.chunks_collection:
             print("❌ 未设置 CHUNKS_COLLECTION")
         else:
             # 执行节点函数

@@ -3,6 +3,7 @@ import os
 from app.utils.task_utils import add_running_task, add_done_task
 from app.lm.embedding_utils import generate_embeddings
 from app.clients.milvus_utils import create_hybrid_search_requests, hybrid_search, get_milvus_client
+from app.conf.milvus_config import milvus_config  # 配置收敛（P1.4）
 from app.core.logger import logger
 from dotenv import load_dotenv, find_dotenv
 
@@ -48,7 +49,7 @@ def node_search_embedding(state):
 
     # 3. 准备Milvus向量数据库连接相关配置，指定检索的集合
     # 从环境变量中获取Milvus中存储「文本片段向量」的集合名（表名），避免硬编码
-    collection_name = os.environ.get("CHUNKS_COLLECTION")
+    collection_name = milvus_config.chunks_collection
     logger.info(f"正在连接到 Milvus 并准备集合 '{collection_name}'...")
 
     # 4. 构造Milvus混合搜索请求对象（核心步骤）

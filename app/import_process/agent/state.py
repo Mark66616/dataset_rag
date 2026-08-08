@@ -39,6 +39,9 @@ class ImportGraphState(TypedDict):
     document_id: str          # 逻辑文档ID（首次上传生成 UUID；更新上传由调用方传入，稳定不变）
     document_version: int     # 文档版本号（每次更新上传 +1），配合 index_status 做 staging/active 切换
 
+    # --- 对象存储（P0.4：上传文件入 MinIO） ---
+    minio_object_key: str     # 上传文件在 MinIO 中的对象键（为空表示未上传）
+
     # --- 数据库相关 ---
     embeddings_content: list # 包含向量数据的列表，准备写入 Milvus
 
@@ -65,6 +68,7 @@ graph_default_state: ImportGraphState = {
     "item_name": "",
     "document_id": "",
     "document_version": 1,
+    "minio_object_key": "",
     "embeddings_content": []
 }
 

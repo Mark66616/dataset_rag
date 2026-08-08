@@ -13,6 +13,7 @@ from app.utils.path_util import PROJECT_ROOT
 from app.utils.task_utils import *
 from app.utils.sse_utils import create_sse_queue, SSEEvent, sse_generator
 from app.clients.mongo_history_utils import *
+from app.clients.minio_utils import upload_file as upload_file_to_minio
 from app.import_process.agent.main_graph import kb_import_app
 from app.import_process.agent.nodes.node_publish_version import mark_document_failed
 from app.core.node_hooks import TaskCancelledError
@@ -74,7 +75,7 @@ async def cancel_task(task_id: str):
 # 后台任务：LangGraph全流程执行
 # 独立于主请求线程，由BackgroundTasks触发，避免阻塞接口响应
 # --------------------------
-def run_graph_task(task_id: str, local_dir: str, local_file_path: str, document_id: str = "", document_version: int = 1):
+def run_graph_task(task_id: str, local_dir: str, local_file_path: str, document_id: str = "", document_version: int = 1, minio_object_key: str = ""):
     """
     LangGraph全流程执行后台任务
     核心流程：初始化状态 → 流式执行图节点 → 实时更新任务状态 → 异常捕获
@@ -86,6 +87,7 @@ def run_graph_task(task_id: str, local_dir: str, local_file_path: str, document_
     :param local_file_path: 上传文件的本地绝对路径
     :param document_id: 逻辑文档ID（更新上传时由调用方传入，保持稳定；为空则首次上传生成）
     :param document_version: 文档版本号（更新上传时传入；默认 1）
+    :param minio_object_key: 上传文件在 MinIO 中的对象键（P0.4；为空表示未上传 MinIO）
     """
     try:
         # 1. 更新任务全局状态为：处理中
@@ -99,6 +101,7 @@ def run_graph_task(task_id: str, local_dir: str, local_file_path: str, document_
         init_state["local_file_path"] = local_file_path  # 上传文件本地路径
         init_state["document_id"] = document_id or ""  # 文档ID（空则 node_entry 生成 UUID）
         init_state["document_version"] = int(document_version or 1)  # 文档版本号
+        init_state["minio_object_key"] = minio_object_key or ""  # MinIO对象键（P0.4）
 
         # 3. 流式执行LangGraph全流程（stream模式：实时获取每个节点的执行结果）
         # 传入 config.thread_id=task_id：与 MongoDB Checkpointer 配合，
@@ -185,10 +188,22 @@ async def upload_files(
             shutil.copyfileobj(file.file, file_buffer)
         logger.info(f"[{task_id}] 文件已保存至本地，路径：{local_file_abs_path}")
 
-        # 7. 标记「文件上传」阶段为「已完成」
+        # 7. 同步上传到 MinIO（P0.4）：本地仍是权威副本，MinIO 作为持久化归档；
+        #    上传失败仅记日志不阻塞（返回 False 时 minio_object_key 置空）
+        minio_object_key = f"kb/{task_id}/{file.filename}"
+        upload_ok = upload_file_to_minio(
+            str(local_file_abs_path),
+            minio_object_key,
+            file.content_type or "application/octet-stream",
+        )
+        if not upload_ok:
+            minio_object_key = ""
+        logger.info(f"[{task_id}] MinIO对象键：{minio_object_key or '未上传（降级为仅本地）'}")
+
+        # 8. 标记「文件上传」阶段为「已完成」
         add_done_task(task_id, "upload_file")
 
-        # 8. 将LangGraph全流程处理加入FastAPI后台任务
+        # 9. 将LangGraph全流程处理加入FastAPI后台任务
         background_tasks.add_task(
             run_graph_task,
             task_id,
@@ -196,10 +211,11 @@ async def upload_files(
             str(local_file_abs_path),
             document_id or "",
             document_version or 1,
+            minio_object_key,
         )
         logger.info(f"[{task_id}] 已将LangGraph全流程加入后台任务，任务已启动（document_id={document_id or '自动生成'}，v{document_version or 1}）")
 
-    # 9. 所有文件处理完毕，返回上传成功信息和所有TaskID
+    # 10. 所有文件处理完毕，返回上传成功信息和所有TaskID
     logger.info(f"多文件上传处理完毕，共处理{len(files)}个文件，生成TaskID列表：{task_ids}")
     return {
         "code": 200,

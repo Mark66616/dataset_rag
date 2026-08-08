@@ -13,6 +13,7 @@ from app.lm.lm_utils import get_llm_client
 from app.lm.embedding_utils import generate_embeddings
 from app.clients.milvus_utils import get_milvus_client, create_hybrid_search_requests, hybrid_search
 from dotenv import load_dotenv,find_dotenv
+from app.conf.milvus_config import milvus_config  # 配置收敛（P1.4）
 from app.core.logger import logger
 
 load_dotenv(find_dotenv())
@@ -140,7 +141,7 @@ def step_4_vectorize_and_query(item_names) -> List[Dict]:
 
     # 从环境变量中获取Milvus中存储商品名称向量的集合名（表名）
     # kb_item_names
-    collection_name = os.environ.get("ITEM_NAME_COLLECTION")
+    collection_name = milvus_config.item_name_collection
     # 校验集合名是否存在，不存在则记录错误日志并返回空结果
     if not collection_name:
         logging.error("No collection name found in env")

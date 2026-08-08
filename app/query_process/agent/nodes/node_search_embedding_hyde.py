@@ -4,6 +4,7 @@ from app.utils.task_utils import add_running_task, add_done_task
 from app.lm.lm_utils import *
 from app.lm.embedding_utils import *
 from app.clients.milvus_utils import *
+from app.conf.milvus_config import milvus_config  # 配置收敛（P1.4）
 from app.core.logger import logger
 from app.core.load_prompt import load_prompt
 from dotenv import load_dotenv, find_dotenv
@@ -83,7 +84,7 @@ def step_2_search_embedding_hyde(
     embeddings = generate_embeddings([combined_text])
 
     # 3. 准备 Milvus 检索
-    collection_name = os.environ.get("CHUNKS_COLLECTION")
+    collection_name = milvus_config.chunks_collection
     if not collection_name:
         logger.error("Step 2 Error: 环境变量 CHUNKS_COLLECTION 未设置")
         return []

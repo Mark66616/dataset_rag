@@ -25,6 +25,8 @@ from app.utils.task_utils import add_running_task
 from app.core.logger import logger
 # 8. 提示词工具：加载本地prompt模板，实现提示词与代码解耦
 from app.core.load_prompt import load_prompt
+# 9. 配置收敛（P1.4）：Milvus 连接信息统一走配置类，不再散落 os.environ.get
+from app.conf.milvus_config import milvus_config
 
 from app.utils.escape_milvus_string_utils import escape_milvus_string
 
@@ -284,8 +286,8 @@ def step_6_save_to_milvus(state: ImportGraphState, file_title: str, item_name: s
         sparse_vector: 步骤5生成的稀疏向量（字典格式）
     """
     # 从环境变量读取Milvus核心配置，与MilvusConfig配置类保持一致
-    milvus_uri = os.environ.get("MILVUS_URL")
-    collection_name = os.environ.get("ITEM_NAME_COLLECTION")
+    milvus_uri = milvus_config.milvus_url
+    collection_name = milvus_config.item_name_collection
 
     # 配置缺失校验：任一配置为空则跳过Milvus存储，记录警告
     if not all([milvus_uri, collection_name]):
@@ -519,7 +521,7 @@ def test_node_item_name_recognition():
 
         # 4. 验证Milvus存储（可选）
         milvus_client = get_milvus_client()
-        collection_name = os.environ.get("ITEM_NAME_COLLECTION")
+        collection_name = milvus_config.item_name_collection
         if milvus_client and collection_name:
             milvus_client.load_collection(collection_name)
             # 检索测试结果
