@@ -13,19 +13,19 @@ from app.query_process.agent.state import QueryGraphState
 builder = StateGraph(QueryGraphState)
 
 # 注册节点：统一用 node_hook 包装（相呼应日志/耗时指标/任务状态）；
-# 调用外部服务（LLM / Milvus / MCP Web）的节点挂载默认重试策略。
-builder.add_node("node_item_name_confirm", node_hook(node_item_name_confirm),
-                 retry_policy=default_retry_policy())  # LLM + Milvus + Mongo，可重试
-builder.add_node("node_search_embedding", node_hook(node_search_embedding),
-                 retry_policy=default_retry_policy())  # BGE 向量化 + Milvus，可重试
-builder.add_node("node_search_embedding_hyde", node_hook(node_search_embedding_hyde),
-                 retry_policy=default_retry_policy())  # LLM + Milvus，可重试
-builder.add_node("node_web_search_mcp", node_hook(node_web_search_mcp),
-                 retry_policy=default_retry_policy())  # MCP Web 搜索，可重试
+# 调用外部服务（LLM / Milvus / MCP Web）的节点挂载默认重试策略 + node_hook 内部节点级超时（P1.3）。
+builder.add_node("node_item_name_confirm", node_hook(node_item_name_confirm, timeout=120.0),
+                 retry_policy=default_retry_policy())  # LLM + Milvus + Mongo，可重试，2分钟超时
+builder.add_node("node_search_embedding", node_hook(node_search_embedding, timeout=120.0),
+                 retry_policy=default_retry_policy())  # BGE 向量化 + Milvus，可重试，2分钟超时
+builder.add_node("node_search_embedding_hyde", node_hook(node_search_embedding_hyde, timeout=120.0),
+                 retry_policy=default_retry_policy())  # LLM + Milvus，可重试，2分钟超时
+builder.add_node("node_web_search_mcp", node_hook(node_web_search_mcp, timeout=60.0),
+                 retry_policy=default_retry_policy())  # MCP Web 搜索，可重试，1分钟超时
 builder.add_node("node_rrf", node_hook(node_rrf))  # 本地融合，不重试
 builder.add_node("node_rerank", node_hook(node_rerank))  # 本地 Rerank，不重试
-builder.add_node("node_answer_output", node_hook(node_answer_output),
-                 retry_policy=default_retry_policy())  # LLM 生成，可重试
+builder.add_node("node_answer_output", node_hook(node_answer_output, timeout=120.0),
+                 retry_policy=default_retry_policy())  # LLM 生成，可重试，2分钟超时
 
 # 入口
 builder.set_entry_point("node_item_name_confirm")

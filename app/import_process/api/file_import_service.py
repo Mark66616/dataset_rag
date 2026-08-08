@@ -15,6 +15,7 @@ from app.utils.sse_utils import create_sse_queue, SSEEvent, sse_generator
 from app.clients.mongo_history_utils import *
 from app.import_process.agent.main_graph import kb_import_app
 from app.import_process.agent.nodes.node_publish_version import mark_document_failed
+from app.core.node_hooks import TaskCancelledError
 from dotenv import load_dotenv
 
 # 定义fastapi对象
@@ -50,6 +51,24 @@ async def get_import_page():
         path=html_abs_path,
         media_type="text/html"  # 显式指定媒体类型为HTML，确保浏览器正确解析
     )
+
+
+@app.post("/cancel/{task_id}", summary="取消导入任务", description="请求取消指定导入任务（下次节点执行前生效，取消状态保持 cancelled）")
+async def cancel_task(task_id: str):
+    """
+    取消导入任务（P1.3）。
+
+    LangGraph 无原生 cancel API，采用「取消标志轮询」：
+    - 此处将任务状态标记为 cancelled；
+    - node_hook 在每个节点执行前轮询该标志，发现已取消则抛 TaskCancelledError 终止链路；
+    - 正在执行的节点无法被中途打断（该节点跑完后才生效），这是标志轮询方案的固有边界。
+    """
+    cancelled = cancel_task_by_id(task_id)
+    if cancelled:
+        logger.info(f"[{task_id}] 已请求取消任务")
+        return {"code": 0, "message": "取消请求已提交，任务将在当前节点完成后终止", "task_id": task_id}
+    logger.warning(f"[{task_id}] 取消失败：任务不存在或已结束")
+    raise HTTPException(status_code=404, detail="任务不存在或已结束，无法取消")
 
 # --------------------------
 # 后台任务：LangGraph全流程执行
@@ -100,6 +119,10 @@ def run_graph_task(task_id: str, local_dir: str, local_file_path: str, document_
 
     except Exception as e:
         # 5. 捕获全流程异常，更新任务全局状态为：失败，并记录错误日志（含堆栈）
+        # 任务被取消（TaskCancelledError）时保持 cancelled 状态，不覆盖为 failed
+        if isinstance(e, TaskCancelledError):
+            logger.warning(f"[{task_id}] 任务已被取消，保持 cancelled 状态")
+            return
         update_task_status(task_id, "failed")
         logger.error(f"[{task_id}] LangGraph全流程执行失败，异常信息：{str(e)}", exc_info=True)
         # 失败兜底（P0.3）：将残留 staging 数据标记为 failed，旧 active 版本不受影响

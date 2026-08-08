@@ -21,6 +21,7 @@ TASK_STATUS_PENDING = "pending"
 TASK_STATUS_PROCESSING = "processing"
 TASK_STATUS_COMPLETED = "completed"
 TASK_STATUS_FAILED = "failed"
+TASK_STATUS_CANCELLED = "cancelled"
 
 # 节点名 -> 中文名映射（用于前端展示）
 # 说明：这里的 key 应与 LangGraph 的 add_node("xxx", ...) 中的节点名一致。
@@ -169,6 +170,36 @@ def update_task_status(task_id: str, status_name: str, push_queue: bool = False)
     _tasks_status[task_id] = status_name
     if push_queue:
         task_push_queue(task_id)
+
+
+# ---------------------------
+# 任务取消支持（P1.3）
+# ---------------------------
+def cancel_task_by_id(task_id: str) -> bool:
+    """
+    请求取消任务：将任务状态标记为 cancelled。
+
+    实际终止由节点执行前的取消检查完成（见 node_hooks 的 node_hook）：
+    LangGraph 没有原生 cancel API，采用「取消标志轮询」——每个节点执行前
+    检查一次标志，发现已取消则抛出 TaskCancelledError 终止链路。
+
+    返回：
+    - bool: 任务存在且可取消返回 True；任务不存在或已完成/失败/已取消返回 False
+    """
+    status = _tasks_status.get(task_id)
+    if not status:
+        # 任务不存在（从未注册过状态）
+        return False
+    if status in (TASK_STATUS_COMPLETED, TASK_STATUS_FAILED, TASK_STATUS_CANCELLED):
+        return False
+    _tasks_status[task_id] = TASK_STATUS_CANCELLED
+    task_push_queue(task_id)
+    return True
+
+
+def is_task_cancelled(task_id: str) -> bool:
+    """检查任务是否已被请求取消（供节点 hook 在节点执行前轮询）。"""
+    return _tasks_status.get(task_id) == TASK_STATUS_CANCELLED
 
 
 def task_push_queue(task_id: str):

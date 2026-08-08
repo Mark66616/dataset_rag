@@ -32,19 +32,21 @@ workflow = StateGraph(ImportGraphState)
 # 说明：所有节点统一用 node_hook 包装，获得「开始/完成/异常」相呼应日志、耗时指标与任务状态更新；
 # 调用外部服务（MinerU / VLM / LLM / Milvus）的节点额外挂载默认重试策略（指数退避 + 抖动）。
 # 注意：节点标识与函数名保持一致，便于维护。
+# 超时策略（P1.3）：node_hook 内部实现节点级超时（LangGraph 的 add_node timeout
+# 仅支持 async 节点；本项目为同步节点，故在 hook 内用线程池实现，超时抛 TimeoutError 走失败处理）。
 workflow.add_node("node_entry", node_hook(node_entry))  # 流程入口：参数初始化、输入校验
-workflow.add_node("node_pdf_to_md", node_hook(node_pdf_to_md),
-                  retry_policy=default_retry_policy())  # PDF转MD：MinerU 外部 API，可重试
-workflow.add_node("node_md_img", node_hook(node_md_img),
-                  retry_policy=default_retry_policy())  # MD图片处理：VLM + MinIO 外部依赖，可重试
+workflow.add_node("node_pdf_to_md", node_hook(node_pdf_to_md, timeout=600.0),
+                  retry_policy=default_retry_policy())  # PDF转MD：MinerU 外部 API，可重试，10分钟超时
+workflow.add_node("node_md_img", node_hook(node_md_img, timeout=300.0),
+                  retry_policy=default_retry_policy())  # MD图片处理：VLM + MinIO 外部依赖，可重试，5分钟超时
 workflow.add_node("node_document_split", node_hook(node_document_split))  # 文档分块：本地计算，不重试
-workflow.add_node("node_item_name_recognition", node_hook(node_item_name_recognition),
-                  retry_policy=default_retry_policy())  # 项目名识别：LLM + Milvus 外部依赖，可重试
+workflow.add_node("node_item_name_recognition", node_hook(node_item_name_recognition, timeout=300.0),
+                  retry_policy=default_retry_policy())  # 项目名识别：LLM + Milvus 外部依赖，可重试，5分钟超时
 workflow.add_node("node_bge_embedding", node_hook(node_bge_embedding))  # BGE向量化：本地模型，不重试
-workflow.add_node("node_import_milvus", node_hook(node_import_milvus),
-                  retry_policy=default_retry_policy())  # 向量入库：Milvus 外部依赖，可重试
-workflow.add_node("node_publish_version", node_hook(node_publish_version),
-                  retry_policy=default_retry_policy())  # 版本发布：Milvus 状态切换，可重试
+workflow.add_node("node_import_milvus", node_hook(node_import_milvus, timeout=300.0),
+                  retry_policy=default_retry_policy())  # 向量入库：Milvus 外部依赖，可重试，5分钟超时
+workflow.add_node("node_publish_version", node_hook(node_publish_version, timeout=120.0),
+                  retry_policy=default_retry_policy())  # 版本发布：Milvus 状态切换，可重试，2分钟超时
 
 # ===================== 3. 设置工作流入口节点 =====================
 # 语法：set_entry_point("节点标识") → 推荐写法，直接指定流程起始节点
