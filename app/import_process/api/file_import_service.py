@@ -2,7 +2,7 @@ import shutil
 from pathlib import Path
 import uuid
 import uvicorn
-from fastapi import FastAPI, BackgroundTasks, HTTPException, Request, UploadFile, File
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Request, UploadFile, File, Form
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from starlette.middleware.cors import CORSMiddleware
@@ -14,6 +14,7 @@ from app.utils.task_utils import *
 from app.utils.sse_utils import create_sse_queue, SSEEvent, sse_generator
 from app.clients.mongo_history_utils import *
 from app.import_process.agent.main_graph import kb_import_app
+from app.import_process.agent.nodes.node_publish_version import mark_document_failed
 from dotenv import load_dotenv
 
 # 定义fastapi对象
@@ -54,7 +55,7 @@ async def get_import_page():
 # 后台任务：LangGraph全流程执行
 # 独立于主请求线程，由BackgroundTasks触发，避免阻塞接口响应
 # --------------------------
-def run_graph_task(task_id: str, local_dir: str, local_file_path: str):
+def run_graph_task(task_id: str, local_dir: str, local_file_path: str, document_id: str = "", document_version: int = 1):
     """
     LangGraph全流程执行后台任务
     核心流程：初始化状态 → 流式执行图节点 → 实时更新任务状态 → 异常捕获
@@ -64,6 +65,8 @@ def run_graph_task(task_id: str, local_dir: str, local_file_path: str):
     :param task_id: 全局唯一任务ID，关联单个文件的全流程处理
     :param local_dir: 该任务的本地文件存储目录（含临时文件/解析结果）
     :param local_file_path: 上传文件的本地绝对路径
+    :param document_id: 逻辑文档ID（更新上传时由调用方传入，保持稳定；为空则首次上传生成）
+    :param document_version: 文档版本号（更新上传时传入；默认 1）
     """
     try:
         # 1. 更新任务全局状态为：处理中
@@ -75,6 +78,8 @@ def run_graph_task(task_id: str, local_dir: str, local_file_path: str):
         init_state["task_id"] = task_id  # 任务ID关联
         init_state["local_dir"] = local_dir  # 任务本地目录
         init_state["local_file_path"] = local_file_path  # 上传文件本地路径
+        init_state["document_id"] = document_id or ""  # 文档ID（空则 node_entry 生成 UUID）
+        init_state["document_version"] = int(document_version or 1)  # 文档版本号
 
         # 3. 流式执行LangGraph全流程（stream模式：实时获取每个节点的执行结果）
         # 传入 config.thread_id=task_id：与 MongoDB Checkpointer 配合，
@@ -97,6 +102,11 @@ def run_graph_task(task_id: str, local_dir: str, local_file_path: str):
         # 5. 捕获全流程异常，更新任务全局状态为：失败，并记录错误日志（含堆栈）
         update_task_status(task_id, "failed")
         logger.error(f"[{task_id}] LangGraph全流程执行失败，异常信息：{str(e)}", exc_info=True)
+        # 失败兜底（P0.3）：将残留 staging 数据标记为 failed，旧 active 版本不受影响
+        try:
+            mark_document_failed(document_id)
+        except Exception as mark_err:
+            logger.warning(f"[{task_id}] 失败兜底标记异常：{mark_err}")
 
 # --------------------------
 # 核心接口：多文件上传接口（不上传 MinIO）
@@ -108,7 +118,9 @@ from pathlib import Path
 @app.post("/upload", summary="文件上传接口", description="支持多文件批量上传，自动触发知识库导入全流程")
 async def upload_files(
     background_tasks: BackgroundTasks,
-    files: List[UploadFile] = File(...)
+    files: List[UploadFile] = File(...),
+    document_id: str = Form(None, description="逻辑文档ID（更新上传时传入；为空则首次上传自动生成）"),
+    document_version: int = Form(1, description="文档版本号（更新上传时传入；默认 1）"),
 ):
     """
     文件上传核心接口（不上传 MinIO）
@@ -158,9 +170,11 @@ async def upload_files(
             run_graph_task,
             task_id,
             str(task_local_dir),
-            str(local_file_abs_path)
+            str(local_file_abs_path),
+            document_id or "",
+            document_version or 1,
         )
-        logger.info(f"[{task_id}] 已将LangGraph全流程加入后台任务，任务已启动")
+        logger.info(f"[{task_id}] 已将LangGraph全流程加入后台任务，任务已启动（document_id={document_id or '自动生成'}，v{document_version or 1}）")
 
     # 9. 所有文件处理完毕，返回上传成功信息和所有TaskID
     logger.info(f"多文件上传处理完毕，共处理{len(files)}个文件，生成TaskID列表：{task_ids}")

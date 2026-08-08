@@ -1,5 +1,6 @@
 import os
 import sys
+import uuid
 from os.path import splitext
 
 from app.core.logger import logger
@@ -48,6 +49,16 @@ def node_entry(state: ImportGraphState) -> ImportGraphState:
     file_name = os.path.basename(document_path)
     state["file_title"] = splitext(file_name)[0]
     logger.info(f"【{func_name}】文件业务标识提取完成：file_title = {state['file_title']}")
+
+    # 4. 文档版本标识（P0.3）：document_id 稳定不变（更新上传时由调用方传入，
+    #    首次上传由服务端生成 UUID，不用文件名/哈希推导）；document_version 为本次上传版本号。
+    if not state.get("document_id"):
+        state["document_id"] = str(uuid.uuid4())
+    state["document_version"] = int(state.get("document_version") or 1)
+    logger.info(
+        f"【{func_name}】文档版本标识就绪：document_id = {state['document_id']}，"
+        f"document_version = {state['document_version']}"
+    )
 
     # 结束：记录节点运行状态
     add_done_task(state["task_id"], func_name)

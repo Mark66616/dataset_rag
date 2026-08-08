@@ -62,8 +62,8 @@ def node_search_embedding(state):
 
     # 对每个商品名添加双引号，拼接为Milvus支持的in语法格式
     quoted = ", ".join(f'"{v}"' for v in item_names)
-    # 构造最终过滤表达式
-    expr = f"item_name in [{quoted}]"
+    # 构造最终过滤表达式：限定商品名 + 仅检索 active 版本（P0.3：避免检索到 staging/superseded 数据）
+    expr = f'item_name in [{quoted}] and index_status == "active"'
     logger.info(f"创建搜索请求过滤表达式: {expr}")
 
     # 构造稠密+稀疏混合搜索请求，整合向量、过滤条件、搜索参数

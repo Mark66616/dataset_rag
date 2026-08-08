@@ -95,7 +95,8 @@ def step_2_search_embedding_hyde(
     if item_names:
         # 处理 item_names 中的引号，防止注入或语法错误
         quoted = ", ".join(f'"{v}"' for v in item_names)
-        expr = f"item_name in [{quoted}]"
+        # P0.3：仅检索 active 版本，避免检索到 staging/superseded 数据
+        expr = f'item_name in [{quoted}] and index_status == "active"'
         logger.info(f"Step 2: 应用过滤条件: {expr}")
     else:
         logger.info("Step 2: 未指定商品名过滤，将全库检索")

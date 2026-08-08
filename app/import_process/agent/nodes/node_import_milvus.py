@@ -1,6 +1,6 @@
 import os
 import sys
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 # 导入Milvus相关依赖
 from pymilvus import DataType
 # 导入自定义模块
@@ -53,10 +53,10 @@ def node_import_milvus(state: Dict[str, Any]) -> Dict[str, Any]:
         chunks_json_data, vector_dimension = step_1_check_input(state)
         # 步骤2：Milvus客户端连接+集合准备（自动建表）
         client = step_2_prepare_collection(vector_dimension)
-        # 步骤3：幂等性处理 - 清理同item_name旧数据
-        step_3_clean_old_data(client, chunks_json_data)
-        # 步骤4：批量插入数据+主键chunk_id回填
-        updated_chunks = step_4_insert_data(client, chunks_json_data)
+        # 步骤3：幂等性处理 - 按 document_id 清理非 active 残留（不删 active）
+        step_3_clean_old_data(client, chunks_json_data, document_id=state.get("document_id", ""))
+        # 步骤4：批量插入数据（注入 document_id/document_version/index_status=staging）+主键回填
+        updated_chunks = step_4_insert_data(client, chunks_json_data, state)
         # 步骤5：更新全局状态，将回填后的切片回传下游
         state["chunks"] = updated_chunks
 
@@ -126,7 +126,12 @@ def create_collection(client, collection_name: str, vector_dimension: int):
     schema.add_field(field_name="parent_title", datatype=DataType.VARCHAR, max_length=65535)  # 父标题
     schema.add_field(field_name="part", datatype=DataType.INT8)  # 分片编号
     schema.add_field(field_name="file_title", datatype=DataType.VARCHAR, max_length=65535)  # 源文件标题
-    schema.add_field(field_name="item_name", datatype=DataType.VARCHAR, max_length=65535)  # 商品名称（幂等性依据）
+    schema.add_field(field_name="item_name", datatype=DataType.VARCHAR, max_length=65535)  # 商品名称（检索过滤用）
+    # 文档版本字段（P0.3）：document_id 稳定标识文档；document_version 版本号；
+    # index_status 状态机 staging→active→superseded/failed，检索只查 active，防检索窗口期
+    schema.add_field(field_name="document_id", datatype=DataType.VARCHAR, max_length=255)  # 逻辑文档ID
+    schema.add_field(field_name="document_version", datatype=DataType.INT64)  # 文档版本号
+    schema.add_field(field_name="index_status", datatype=DataType.VARCHAR, max_length=32)  # 索引状态
     schema.add_field(field_name="sparse_vector", datatype=DataType.SPARSE_FLOAT_VECTOR)  # 稀疏向量
     schema.add_field(field_name="dense_vector", datatype=DataType.FLOAT_VECTOR, dim=vector_dimension)  # 稠密向量
     # 对于 BGE-M3 模型 ：
@@ -206,68 +211,67 @@ def step_2_prepare_collection(vector_dimension: int):
 
     return client
 
-def step_3_clean_old_data(client, chunks_json_data: List[Dict[str, Any]]):
+def step_3_clean_old_data(client, chunks_json_data: List[Dict[str, Any]], document_id: str = "") -> None:
     """
-    步骤3：幂等性处理 - 基于item_name清理旧数据
-    核心设计：
-        插入新数据前删除同item_name的所有旧切片，确保多次执行仅保留最新数据
-        支持多item_name批量清理，自动去重避免重复操作
+    步骤3：幂等性处理 - 基于 document_id 清理非 active 残留数据（P0.3）
+
+    设计要点（修复"同商品名互删"缺陷 + 防检索窗口期）：
+        1. 只清理「非 active」的残留（failed / superseded / 上次失败的 staging），
+           绝不动 active 数据——旧版本在检索期内持续可用；
+        2. 清理范围按 document_id（逻辑文档）而非 item_name（商品名）：
+           两个不同文档即使识别出同一商品名，也互不干扰；
+        3. active 版本的状态切换（superseded）由发布节点 node_publish_version 完成，
+           本节点只做"残留清理"这一件小事。
+
     参数：
         client - MilvusClient实例
-        chunks_json_data: List[Dict[str, Any]] - 待入库的切片列表
+        chunks_json_data: List[Dict[str, Any]] - 待入库的切片列表（从中提取 document_id）
+        document_id: str - 逻辑文档ID；为空时从切片数据中提取
     """
-    # 提取并去重item_name，避免重复清理同一商品数据
-    # - 顺序 ：先循环 ( for ) -> 再判断 ( if ) -> 最后产出 ( name )。
-    # - 海象操作符 ( := ) 的作用 ：它在第 ② 步判断的时候，顺手把处理好的字符串塞进了 name 变量里。如果 name 是空字符串 ""
-    # （在 Python 里等同于 False）， if 条件不成立，第 ③ 步就不会执行，这个空值就被扔掉了。
-    item_names = sorted(
-    {   name  # ③ 最后一步：如果没被 if 拦住，把 name 丢进篮子里
-        for x in chunks_json_data or []  # ① 第一步：开始循环，拿到 x
-        if (name := str(x.get("item_name", "")).strip())  # ② 第二步：提取 -> 去空格 -> 赋值给 name -> 判断 name 是否为空
-    })
+    # 提取 document_id（优先用显式参数，其次从切片数据取）
+    if not document_id:
+        for x in chunks_json_data or []:
+            if isinstance(x, dict) and x.get("document_id"):
+                document_id = str(x["document_id"]).strip()
+                break
 
-    # 无有效item_name则跳过清理
-    if not item_names:
-        logger.warning("Milvus幂等性清理跳过：切片中无有效item_name")
+    if not document_id:
+        logger.warning("Milvus幂等性清理跳过：未获取到有效 document_id")
         return
-    # 多item_name提示日志
-    if len(item_names) > 1:
-        logger.warning(f"Milvus幂等性清理：本次检测到多个item_name，将逐个清理：{item_names}")
 
-    # 遍历item_name，逐个清理旧数据
-    for i_name in item_names:
-        _clear_chunks_by_item_name(client, CHUNKS_COLLECTION_NAME, i_name)
+    _clear_non_active_by_document_id(client, CHUNKS_COLLECTION_NAME, document_id)
 
 
-def _clear_chunks_by_item_name(client, collection_name: str, item_name: str):
+def _clear_non_active_by_document_id(client, collection_name: str, document_id: str):
     """
-    内部核心函数：根据item_name删除Milvus中的旧切片数据
+    内部核心函数：删除指定 document_id 下所有「非 active」的旧数据（残留清理）。
+
     参数：
         client - MilvusClient实例
         collection_name: str - 集合名称
-        item_name: str - 要清理的商品名称
+        document_id: str - 逻辑文档ID
     异常：
-        清理失败抛出ValueError，终止整个入库流程（保证幂等性）
+        清理失败抛出ValueError，终止整个入库流程（保证数据一致性）
     """
-    # 预处理：去除空格，空值直接返回
-    i_name = (item_name or "").strip()
-    if not i_name:
-        logger.warning("Milvus单商品清理跳过：item_name为空")
+    doc_id = (document_id or "").strip()
+    if not doc_id:
+        logger.warning("Milvus残留清理跳过：document_id为空")
         return
     if not collection_name:
-        logger.warning("Milvus单商品清理跳过：集合名称未配置")
+        logger.warning("Milvus残留清理跳过：集合名称未配置")
         return
 
     try:
         # 集合不存在则无需清理
         if not client.has_collection(collection_name=collection_name):
-            logger.info(f"Milvus单商品清理跳过：集合{collection_name}不存在")
+            logger.info(f"Milvus残留清理跳过：集合{collection_name}不存在")
             return
 
-        # 1. 商品名称安全转义，避免filter表达式报错
-        safe_item_name = escape_milvus_string(i_name)
-        filter_expr = f'item_name == "{safe_item_name}"'
-        logger.info(f"Milvus幂等性清理：开始删除集合{collection_name}中item_name={i_name}的旧数据")
+        # 1. 文档ID安全转义，避免filter表达式报错
+        safe_doc_id = escape_milvus_string(doc_id)
+        # 只清非 active 残留（failed/superseded/失败 staging），active 由发布节点管理
+        filter_expr = f'document_id == "{safe_doc_id}" and index_status != "active"'
+        logger.info(f"Milvus残留清理：删除集合{collection_name}中{document_id}的非active残留数据")
 
         # 2. 执行删除操作
         client.delete(collection_name=collection_name, filter=filter_expr)
@@ -277,35 +281,48 @@ def _clear_chunks_by_item_name(client, collection_name: str, item_name: str):
             try:
                 client.flush(collection_name=collection_name)
             except Exception as e:
-                logger.warning(f"Milvus幂等性清理：flush操作失败，不影响主流程 | 错误：{str(e)}")
+                logger.warning(f"Milvus残留清理：flush操作失败，不影响主流程 | 错误：{str(e)}")
 
-        logger.info(f"Milvus幂等性清理完成：成功删除item_name={i_name}的旧数据")
+        logger.info(f"Milvus残留清理完成：{document_id} 的非active残留数据已清理")
     except Exception as e:
-        logger.error(f"Milvus幂等性清理失败：item_name={i_name} | 错误：{str(e)}", exc_info=True)
-        raise ValueError(f"幂等清理失败（item_name={i_name}）: {e}")
+        logger.error(f"Milvus残留清理失败：document_id={document_id} | 错误：{str(e)}", exc_info=True)
+        raise ValueError(f"幂等清理失败（document_id={document_id}）: {e}")
 
-def step_4_insert_data(client, chunks_json_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def step_4_insert_data(client, chunks_json_data: List[Dict[str, Any]], state: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     """
     步骤4：批量插入切片数据到Milvus+主键回填
     核心逻辑：
         1. 移除手动chunk_id：因auto_id=True，Milvus自动生成主键，避免冲突
-        2. 批量插入数据：提升入库效率，减少Milvus连接次数
-        3. 回填chunk_id：将Milvus生成的自增主键回填到切片，供下游业务使用
+        2. 注入文档版本字段（P0.3）：document_id / document_version / index_status='staging'，
+           新数据以 staging 状态写入，不影响正在被检索的 active 版本
+        3. 批量插入数据：提升入库效率，减少Milvus连接次数
+        4. 回填chunk_id：将Milvus生成的自增主键回填到切片，供下游业务使用
     参数：
         client - MilvusClient实例
         chunks_json_data: List[Dict[str, Any]] - 待入库的切片列表
+        state - 全局状态（提供 document_id / document_version）
     返回：
         List[Dict[str, Any]] - 回填了chunk_id的切片列表
     """
-    # 1. 预处理数据：移除手动chunk_id，避免与Milvus自增主键冲突
+    state = state or {}
+    document_id = str(state.get("document_id") or "")
+    document_version = int(state.get("document_version") or 1)
+
+    # 1. 预处理数据：移除手动chunk_id，注入文档版本字段
     data_to_insert = []
     for item in chunks_json_data:
         item_copy = item.copy()
         if isinstance(item_copy, dict) and "chunk_id" in item_copy:
             item_copy.pop("chunk_id", None)
+        # 注入版本字段：staging 状态写入，发布节点负责切换为 active
+        if isinstance(item_copy, dict):
+            if document_id:
+                item_copy["document_id"] = document_id
+            item_copy["document_version"] = document_version
+            item_copy["index_status"] = "staging"
         data_to_insert.append(item_copy)
 
-    logger.info(f"Milvus数据插入：准备{len(data_to_insert)}条切片数据，开始批量插入")
+    logger.info(f"Milvus数据插入：准备{len(data_to_insert)}条切片数据（doc={document_id}, v{document_version}, staging）")
     # 2. 执行批量插入
     insert_result = client.insert(collection_name=CHUNKS_COLLECTION_NAME, data=data_to_insert)
     insert_count = insert_result.get('insert_count', 0)

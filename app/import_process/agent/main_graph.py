@@ -16,6 +16,7 @@ from app.import_process.agent.nodes.node_document_split import node_document_spl
 from app.import_process.agent.nodes.node_item_name_recognition import node_item_name_recognition  # 项目名识别：从分块中提取核心项目名称（业务定制化）
 from app.import_process.agent.nodes.node_bge_embedding import node_bge_embedding  # BGE向量化：将文本分块转换为向量表示（适配Milvus向量库）
 from app.import_process.agent.nodes.node_import_milvus import node_import_milvus  # 导入Milvus：将向量数据写入Milvus向量数据库
+from app.import_process.agent.nodes.node_publish_version import node_publish_version  # 版本发布：staging→active，旧版本→superseded
 
 
 # 初始化环境变量：必须在配置读取前执行，确保后续节点能获取到环境变量中的配置信息
@@ -42,6 +43,8 @@ workflow.add_node("node_item_name_recognition", node_hook(node_item_name_recogni
 workflow.add_node("node_bge_embedding", node_hook(node_bge_embedding))  # BGE向量化：本地模型，不重试
 workflow.add_node("node_import_milvus", node_hook(node_import_milvus),
                   retry_policy=default_retry_policy())  # 向量入库：Milvus 外部依赖，可重试
+workflow.add_node("node_publish_version", node_hook(node_publish_version),
+                  retry_policy=default_retry_policy())  # 版本发布：Milvus 状态切换，可重试
 
 # ===================== 3. 设置工作流入口节点 =====================
 # 语法：set_entry_point("节点标识") → 推荐写法，直接指定流程起始节点
@@ -89,7 +92,8 @@ workflow.add_edge("node_md_img", "node_document_split")  # MD处理完成 → �
 workflow.add_edge("node_document_split", "node_item_name_recognition")  # 分块完成 → 项目名识别
 workflow.add_edge("node_item_name_recognition", "node_bge_embedding")  # 项目名识别完成 → BGE向量化
 workflow.add_edge("node_bge_embedding", "node_import_milvus")  # 向量化完成 → 导入milvus向量库
-workflow.add_edge("node_import_milvus", END)  # milvus入库完成 → 工作流执行结束（END是内置结束节点）
+workflow.add_edge("node_import_milvus", "node_publish_version")  # 入库完成 → 版本发布（staging→active）
+workflow.add_edge("node_publish_version", END)  # 发布完成 → 工作流执行结束（END是内置结束节点）
 
 # ===================== 6. 编译工作流为可执行对象 =====================
 # 挂载 MongoDB Checkpointer：按 task_id(thread_id) 持久化图执行状态，

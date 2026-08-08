@@ -35,6 +35,10 @@ class ImportGraphState(TypedDict):
     chunks: list          # 切片后的文本列表，包含 metadata
     item_name: str        # 识别出的主体名称 (如: "万用表")，用于增强检索
 
+    # --- 文档版本（P0.3：修复同商品名互删 + 防检索窗口期） ---
+    document_id: str          # 逻辑文档ID（首次上传生成 UUID；更新上传由调用方传入，稳定不变）
+    document_version: int     # 文档版本号（每次更新上传 +1），配合 index_status 做 staging/active 切换
+
     # --- 数据库相关 ---
     embeddings_content: list # 包含向量数据的列表，准备写入 Milvus
 
@@ -59,6 +63,8 @@ graph_default_state: ImportGraphState = {
     "md_content": "",
     "chunks": [],
     "item_name": "",
+    "document_id": "",
+    "document_version": 1,
     "embeddings_content": []
 }
 
